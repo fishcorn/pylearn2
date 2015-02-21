@@ -2248,6 +2248,63 @@ class Tanh(Linear):
 
         raise NotImplementedError()
 
+class Cos(Linear):
+    """
+    A layer that performs an affine transformation of its (vectorial)
+    input followed by a cosine elementwise nonlinearity.
+
+    Parameters
+    ----------
+    kwargs : dict
+        Keyword arguments to pass through to `Linear` class constructor.
+    """
+    def __init__(self, dim, layer_name, **kwargs):
+        # Make the biases random and keep them at those values throughout
+        # training -- this is so that in expectation, the dot product of
+        # two different outputs will properly approximate a kernel.
+        kwargs.update(
+            init_bias=np.random.uniform(low=0.,high=2*np.pi,size=(dim,)),
+            use_bias=True,
+            )
+        super(Cos, self).__init__(dim, layer_name, **kwargs)
+
+    @wraps(Layer.fprop)
+    def fprop(self, state_below):
+
+        p = self._linear_part(state_below)
+        return T.cast(T.cos(p)/np.sqrt(self.dim/2.0), config.floatX)
+
+    @wraps(Layer.cost)
+    def cost(self, *args, **kwargs):
+
+        raise NotImplementedError()
+
+    @wraps(Layer.get_layer_monitoring_channels)
+    def get_layer_monitoring_channels(self, state_below=None,
+                                      state=None, targets=None):
+        # Don't do the normal outputs of activations like in Linear
+        # (mean_x_max_u, etc.). Those outputs will have very close
+        # to constant values from this layer, because in aggregate
+        # we'd output the extrema of a lot of random cosines.
+        # The *norms*, however, are very useful so we still output
+        # those.
+        W, = self.transformer.get_params()
+
+        assert W.ndim == 2
+
+        sq_W = T.sqr(W)
+
+        row_norms = T.sqrt(sq_W.sum(axis=1))
+        col_norms = T.sqrt(sq_W.sum(axis=0))
+
+        rval = OrderedDict([('row_norms_min',  row_norms.min()),
+                            ('row_norms_mean', row_norms.mean()),
+                            ('row_norms_max',  row_norms.max()),
+                            ('col_norms_min',  col_norms.min()),
+                            ('col_norms_mean', col_norms.mean()),
+                            ('col_norms_max',  col_norms.max()), ])
+
+        return rval
 
 class Sigmoid(Linear):
 
