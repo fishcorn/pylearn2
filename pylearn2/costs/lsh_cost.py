@@ -12,8 +12,10 @@ from pylearn2.costs.cost import Cost, DefaultDataSpecsMixin
 from pylearn2.space import (CompositeSpace, IndexSpace)
 from pylearn2.compat import OrderedDict
 
-from theano import tensor
+from theano import tensor as T
 from theano import config
+
+import numpy as np
 
 
 class LSHCriterion(Cost):
@@ -31,21 +33,28 @@ class LSHCriterion(Cost):
         space.validate(data)
 
         from theano.printing import Print
+
         inputs, targets = data
         outputs = model.fprop(inputs)
         batch_size = model.batch_size/2
+
         outputs_a = outputs[:batch_size]
         outputs_b = outputs[batch_size:]
+
         targets_a = targets[:batch_size]
         targets_b = targets[batch_size:]
-        targets = tensor.neq(targets_a, targets_b)
-        l2 = tensor.sqrt(
-            tensor.pow(outputs_a - outputs_b, 2.0).sum()
-        )
-        loss = (
-            (tensor.ones_like(targets) - targets)*tensor.pow(l2, 2.0)
-            + targets*tensor.pow(tensor.maximum(0.0, self.m - l2), 2.0)
-        ).sum()/2.0
+
+        difftargets = T.neq(targets_a, targets_b)
+        liketargets = 1 - difftargets
+
+        # TECHDEBT Fix broadcasting so that the shape fluffing isn't necessary
+        l2sq = T.shape_padright(T.sqr(outputs_a - outputs_b).sum(axis = 1))
+
+        likeloss = liketargets * l2sq 
+        diffloss = difftargets * T.sqr(T.maximum(0.0, self.m - T.sqrt(l2sq)))
+
+        loss = (likeloss + diffloss).sum(dtype=config.floatX)
+
         return loss
 
     def get_data_specs(self, model):
@@ -67,15 +76,32 @@ class LSHCriterion(Cost):
         space.validate(data)
 
         from theano.printing import Print
+
         inputs, targets = data
         outputs = model.fprop(inputs)
         batch_size = model.batch_size/2
+
         outputs_a = outputs[:batch_size]
         outputs_b = outputs[batch_size:]
+
         targets_a = targets[:batch_size]
         targets_b = targets[batch_size:]
-        targets = tensor.neq(targets_a, targets_b)
 
-        rval["y_misclass"] = tensor.cast(targets.sum()/targets.shape[0], config.floatX)
+        difftargets = T.neq(targets_a, targets_b)
+        liketargets = 1 - difftargets
+
+        rval['diff_count'] = difftargets.sum(dtype=config.floatX) 
+        rval['like_count'] = liketargets.sum(dtype=config.floatX) 
+
+        # TECHDEBT Fix broadcasting so that the shape fluffing isn't necessary
+        l2sq = T.shape_padright(T.sqr(outputs_a - outputs_b).sum(axis = 1))
+
+        likeloss = liketargets * l2sq 
+        diffloss = difftargets * T.sqr(T.maximum(0.0, self.m - T.sqrt(l2sq)))
+
+        rval['like_obj'] = likeloss.sum(dtype=config.floatX)
+        rval['diff_obj'] = diffloss.sum(dtype=config.floatX)
+
+        # rval["y_misclass"] = T.cast(targets.sum()/targets.shape[0], config.floatX)
 
         return rval
