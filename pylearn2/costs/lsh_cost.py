@@ -47,8 +47,7 @@ class LSHCriterion(Cost):
         difftargets = T.neq(targets_a, targets_b)
         liketargets = 1 - difftargets
 
-        # TECHDEBT Fix broadcasting so that the shape fluffing isn't necessary
-        l2sq = T.shape_padright(T.sqr(outputs_a - outputs_b).sum(axis = 1))
+        l2sq = T.sqr(outputs_a - outputs_b).sum(axis=1, keepdims=True)
 
         likeloss = liketargets * l2sq 
         diffloss = difftargets * T.sqr(T.maximum(0.0, self.m - T.sqrt(l2sq)))
@@ -90,18 +89,48 @@ class LSHCriterion(Cost):
         difftargets = T.neq(targets_a, targets_b)
         liketargets = 1 - difftargets
 
-        rval['diff_count'] = difftargets.sum(dtype=config.floatX) 
-        rval['like_count'] = liketargets.sum(dtype=config.floatX) 
-
-        # TECHDEBT Fix broadcasting so that the shape fluffing isn't necessary
-        l2sq = T.shape_padright(T.sqr(outputs_a - outputs_b).sum(axis = 1))
+        l2sq = T.sqr(outputs_a - outputs_b).sum(axis=1, keepdims=True)
+        l2 = T.sqrt(l2sq)
 
         likeloss = liketargets * l2sq 
-        diffloss = difftargets * T.sqr(T.maximum(0.0, self.m - T.sqrt(l2sq)))
+        diffloss = difftargets * T.sqr(T.maximum(0.0, self.m - l2))
 
-        rval['like_obj'] = likeloss.sum(dtype=config.floatX)
-        rval['diff_obj'] = diffloss.sum(dtype=config.floatX)
+        rval['lsh_like_obj'] = likeloss.sum(dtype=config.floatX)
+        rval['lsh_diff_obj'] = diffloss.sum(dtype=config.floatX)
 
-        # rval["y_misclass"] = T.cast(targets.sum()/targets.shape[0], config.floatX)
+        likesum = liketargets.sum(dtype='int64')
+        diffsum = difftargets.sum(dtype='int64')
+
+        hamm = (outputs_a*outputs_b < 0).sum(axis=1, keepdims=True, dtype='int64')
+        hmin = hamm.min()
+        hmax = hamm.max()
+
+        rval['lsh_like_hamm_min']  = T.switch(liketargets, hamm, hmax).min().astype(config.floatX)
+        rval['lsh_like_hamm_mean'] = ((hamm * liketargets).sum(dtype='float64')/likesum).astype(config.floatX)
+        rval['lsh_like_hamm_max']  = T.switch(liketargets, hamm, hmin).max().astype(config.floatX)
+        rval['lsh_diff_hamm_min']  = T.switch(difftargets, hamm, hmax).min().astype(config.floatX)
+        rval['lsh_diff_hamm_mean'] = ((hamm * difftargets).sum(dtype='float64')/diffsum).astype(config.floatX)
+        rval['lsh_diff_hamm_max']  = T.switch(difftargets, hamm, hmin).max().astype(config.floatX)
+
+        l2min = l2.min()
+        l2max = l2.max()
+
+        rval['lsh_like_l2_min']  = T.switch(liketargets, l2, l2max).min().astype(config.floatX)
+        rval['lsh_like_l2_mean'] = ((l2 * liketargets).sum(dtype='float64')/likesum).astype(config.floatX)
+        rval['lsh_like_l2_max']  = T.switch(liketargets, l2, l2min).max().astype(config.floatX)
+        rval['lsh_diff_l2_min']  = T.switch(difftargets, l2, l2max).min().astype(config.floatX)
+        rval['lsh_diff_l2_mean'] = ((l2 * difftargets).sum(dtype='float64')/diffsum).astype(config.floatX)
+        rval['lsh_diff_l2_max']  = T.switch(difftargets, l2, l2min).max().astype(config.floatX)
+
+        # Hamming distance is just the size of the symmetric difference
+        pos = (outputs > 0).astype('int64')
+        pos_sum = pos.sum(axis=1, keepdims=True)
+        hamm_mat = pos_sum.T + pos_sum - 2*pos.dot(pos.T)
+        # Add max to diagonal so that we don't pick identical points
+        hamm_mat += T.identity_like(hamm_mat) * hamm_mat.max()
+        hamm_nn = hamm_mat.argsort(axis=0)
+        # Compare targets to targets of 7 nearest neighbors
+        targ_same = T.eq(targets[hamm_nn[:7]], T.shape_padleft(targets))
+        rval['lsh_nn_match'] = targ_same.sum(axis=0).mean().astype(config.floatX)
 
         return rval
