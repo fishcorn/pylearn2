@@ -8,8 +8,8 @@ __license__ = "3-clause BSD"
 __maintainer__ = "Dustin Webb"
 __email__ = "pylearn-dev@googlegroups"
 
-from pylearn2.costs.cost import Cost, DefaultDataSpecsMixin
-from pylearn2.space import (CompositeSpace, IndexSpace)
+from pylearn2.costs.cost import Cost
+from pylearn2.space import CompositeSpace, IndexSpace
 from pylearn2.compat import OrderedDict
 
 from theano import tensor as T
@@ -22,6 +22,12 @@ class LSHCriterion(Cost):
     supervised = True
 
     def __init__(self, m, dim):
+        '''
+        m: the threshold that inputs of different classes must be lower
+        than in order to affect training.
+        dim: must match the number of classes in the data.
+
+        '''
         assert(m > 0)
         self.m = m
 
@@ -131,6 +137,18 @@ class LSHCriterion(Cost):
         hamm_nn = hamm_mat.argsort(axis=0)
         # Compare targets to targets of 7 nearest neighbors
         targ_same = T.eq(targets[hamm_nn[:7]], T.shape_padleft(targets))
-        rval['lsh_nn_match'] = targ_same.sum(axis=0).mean().astype(config.floatX)
+        rval['lsh_hamm_nn_match'] = targ_same.sum(axis=0).mean().astype(config.floatX)
+
+        sqr = T.sqr(outputs)
+        sqr_sum = sqr.sum(axis=1, keepdims=True)
+        l2_mat = sqr_sum.T + sqr_sum - 2*sqr.dot(sqr.T)
+        # Add max to diagonal so that we don't pick identical points
+        l2_mat += T.identity_like(l2_mat) * l2_mat.max()
+        l2_nn = l2_mat.argsort(axis=0)
+        # Compare targets to targets of 7 nearest neighbors (also
+        # don't bother with taking square root -- we're only comparing
+        # and the squared norm will work fine for that)
+        targ_same = T.eq(targets[l2_nn[:7]], T.shape_padleft(targets))
+        rval['lsh_l2_nn_match'] = targ_same.sum(axis=0).mean().astype(config.floatX)
 
         return rval
