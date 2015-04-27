@@ -2272,7 +2272,7 @@ class Cos(Linear):
     def fprop(self, state_below):
 
         p = self._linear_part(state_below)
-        return T.cast(T.cos(p)/np.sqrt(self.dim/2.0), config.floatX)
+        return T.cos(p)/np.sqrt(self.dim/2.0, dtype=config.floatX)
 
     @wraps(Layer.cost)
     def cost(self, *args, **kwargs):

@@ -95,7 +95,7 @@ class LSHCriterion(Cost):
         difftargets = T.neq(targets_a, targets_b)
         liketargets = 1 - difftargets
 
-        l2sq = T.sqr(outputs_a - outputs_b).sum(axis=1, keepdims=True)
+        l2sq = T.sqr(outputs_a - outputs_b).sum(axis=1, keepdims=True, dtype='float32')
         l2 = T.sqrt(l2sq)
 
         likeloss = liketargets * l2sq 
@@ -104,32 +104,32 @@ class LSHCriterion(Cost):
         rval['lsh_like_obj'] = likeloss.sum(dtype=config.floatX)
         rval['lsh_diff_obj'] = diffloss.sum(dtype=config.floatX)
 
-        likesum = liketargets.sum(dtype='int64')
-        diffsum = difftargets.sum(dtype='int64')
+        likesum = liketargets.sum(dtype='int32').astype(config.floatX)
+        diffsum = difftargets.sum(dtype='int32').astype(config.floatX)
 
-        hamm = (outputs_a*outputs_b < 0).sum(axis=1, keepdims=True, dtype='int64')
+        hamm = (outputs_a*outputs_b < 0).sum(axis=1, keepdims=True, dtype='int32')
         hmin = hamm.min()
         hmax = hamm.max()
 
         rval['lsh_like_hamm_min']  = T.switch(liketargets, hamm, hmax).min().astype(config.floatX)
-        rval['lsh_like_hamm_mean'] = ((hamm * liketargets).sum(dtype='float64')/likesum).astype(config.floatX)
+        rval['lsh_like_hamm_mean'] = (hamm * liketargets).sum(dtype=config.floatX)/likesum
         rval['lsh_like_hamm_max']  = T.switch(liketargets, hamm, hmin).max().astype(config.floatX)
         rval['lsh_diff_hamm_min']  = T.switch(difftargets, hamm, hmax).min().astype(config.floatX)
-        rval['lsh_diff_hamm_mean'] = ((hamm * difftargets).sum(dtype='float64')/diffsum).astype(config.floatX)
+        rval['lsh_diff_hamm_mean'] = (hamm * difftargets).sum(dtype=config.floatX)/diffsum
         rval['lsh_diff_hamm_max']  = T.switch(difftargets, hamm, hmin).max().astype(config.floatX)
 
         l2min = l2.min()
         l2max = l2.max()
 
-        rval['lsh_like_l2_min']  = T.switch(liketargets, l2, l2max).min().astype(config.floatX)
-        rval['lsh_like_l2_mean'] = ((l2 * liketargets).sum(dtype='float64')/likesum).astype(config.floatX)
-        rval['lsh_like_l2_max']  = T.switch(liketargets, l2, l2min).max().astype(config.floatX)
-        rval['lsh_diff_l2_min']  = T.switch(difftargets, l2, l2max).min().astype(config.floatX)
-        rval['lsh_diff_l2_mean'] = ((l2 * difftargets).sum(dtype='float64')/diffsum).astype(config.floatX)
-        rval['lsh_diff_l2_max']  = T.switch(difftargets, l2, l2min).max().astype(config.floatX)
+        rval['lsh_like_l2_min']  = T.switch(liketargets, l2, l2max).min() 
+        rval['lsh_like_l2_mean'] = (l2 * liketargets).sum(dtype=config.floatX)/likesum
+        rval['lsh_like_l2_max']  = T.switch(liketargets, l2, l2min).max() 
+        rval['lsh_diff_l2_min']  = T.switch(difftargets, l2, l2max).min() 
+        rval['lsh_diff_l2_mean'] = (l2 * difftargets).sum(dtype=config.floatX)/diffsum
+        rval['lsh_diff_l2_max']  = T.switch(difftargets, l2, l2min).max() 
 
         # Hamming distance is just the size of the symmetric difference
-        pos = (outputs > 0).astype('int64')
+        pos = (outputs > 0).astype('int32')
         pos_sum = pos.sum(axis=1, keepdims=True)
         hamm_mat = pos_sum.T + pos_sum - 2*pos.dot(pos.T)
         # Add max to diagonal so that we don't pick identical points
@@ -137,7 +137,7 @@ class LSHCriterion(Cost):
         hamm_nn = hamm_mat.argsort(axis=0)
         # Compare targets to targets of 7 nearest neighbors
         targ_same = T.eq(targets[hamm_nn[:7]], T.shape_padleft(targets))
-        rval['lsh_hamm_nn_match'] = targ_same.sum(axis=0).mean().astype(config.floatX)
+        rval['lsh_hamm_nn_match'] = targ_same.sum(axis=0).mean(dtype=config.floatX)
 
         sqr = T.sqr(outputs)
         sqr_sum = sqr.sum(axis=1, keepdims=True)
@@ -149,6 +149,6 @@ class LSHCriterion(Cost):
         # don't bother with taking square root -- we're only comparing
         # and the squared norm will work fine for that)
         targ_same = T.eq(targets[l2_nn[:7]], T.shape_padleft(targets))
-        rval['lsh_l2_nn_match'] = targ_same.sum(axis=0).mean().astype(config.floatX)
+        rval['lsh_l2_nn_match'] = targ_same.sum(axis=0).mean(dtype=config.floatX)
 
         return rval
