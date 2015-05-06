@@ -139,6 +139,23 @@ class LSHCriterion(Cost):
         targ_pred = T.eq(targets[hamm_nn], T.shape_padleft(targets))
         rval['lsh_hamm_nn_match'] = targ_pred[:7].sum(axis=0).mean(dtype=config.floatX)
 
+        # Compute mean average precision over all points
+        batch_range = np.arange(1, model.batch_size, dtype=config.floatX)
+        # Average over all query points
+        allpred = targ_pred.mean(axis=1, dtype=config.floatX).flatten().cumsum()
+        # Compute (inf. retrieval) precision and recall
+        rec = allpred/allpred[-1]
+        prc = allpred/batch_range
+        # Sort first by precision and then those by recall (idx1[idx2] is the resulting order)
+        idx1 = prc.argsort(kind='mergesort').flatten()[::-1]
+        idx2 = rec[idx1].argsort(kind='mergesort').flatten()
+        # Condition for integration and compute MAP
+        rec = T.concatenate([np.array([0.],dtype=config.floatX),rec[idx1[idx2]].flatten()])
+        prc = T.concatenate([np.array([1.],dtype=config.floatX),prc[idx1[idx2]].flatten()])
+        widths = T.extra_ops.diff(rec)
+        heights = prc[:-1] + prc[1:]
+        rval['lsh_hamm_nn_map'] = widths.dot(heights)/2 # Trapezoid method
+
         sqr = T.sqr(outputs)
         sqr_sum = sqr.sum(axis=1, keepdims=True)
         l2_mat = sqr_sum.T + sqr_sum - 2*sqr.dot(sqr.T)
