@@ -133,11 +133,11 @@ class LSHCriterion(Cost):
         pos_sum = pos.sum(axis=1, keepdims=True)
         hamm_mat = pos_sum.T + pos_sum - 2*pos.dot(pos.T)
         # Add max to diagonal so that we don't pick identical points
-        hamm_mat += T.identity_like(hamm_mat) * hamm_mat.max()
-        hamm_nn = hamm_mat.argsort(axis=0)
+        hamm_mat += T.identity_like(hamm_mat) * (hamm_mat.max() + 1)
+        hamm_nn = hamm_mat.argsort(axis=0)[:-1,:]
         # Compare targets to targets of 7 nearest neighbors
-        targ_same = T.eq(targets[hamm_nn[:7]], T.shape_padleft(targets))
-        rval['lsh_hamm_nn_match'] = targ_same.sum(axis=0).mean(dtype=config.floatX)
+        targ_pred = T.eq(targets[hamm_nn], T.shape_padleft(targets))
+        rval['lsh_hamm_nn_match'] = targ_pred[:7].sum(axis=0).mean(dtype=config.floatX)
 
         sqr = T.sqr(outputs)
         sqr_sum = sqr.sum(axis=1, keepdims=True)
@@ -152,3 +152,5 @@ class LSHCriterion(Cost):
         rval['lsh_l2_nn_match'] = targ_same.sum(axis=0).mean(dtype=config.floatX)
 
         return rval
+
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
