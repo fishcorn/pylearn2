@@ -2259,9 +2259,9 @@ class Cos(Linear):
         Keyword arguments to pass through to `Linear` class constructor.
     """
     def __init__(self, dim, layer_name, **kwargs):
-        # Make the biases random and keep them at those values throughout
-        # training -- this is so that in expectation, the dot product of
-        # two different outputs will properly approximate a kernel.
+        # Make the biases random -- this is so that in expectation,
+        # the dot product of two different outputs will properly
+        # approximate a kernel.
         kwargs.update(
             init_bias=np.random.uniform(low=0.,high=2*np.pi,size=(dim,)),
             use_bias=True,
