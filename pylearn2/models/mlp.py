@@ -31,10 +31,13 @@ from pylearn2.expr.probabilistic_max_pooling import max_pool_channels
 if cuda_enabled and dnn_available():
     try:
         from pylearn2.linear import cudnn2d as conv2d
+        from pylearn2.linear.cudnn2d import Cudnn2d as Conv2D
     except ImportError:
         from pylearn2.linear import conv2d
+        from pylearn2.linear.conv2d import Conv2D
 else:
     from pylearn2.linear import conv2d
+    from pylearn2.linear.conv2d import Conv2D
 from pylearn2.linear.matrixmul import MatrixMul
 from pylearn2.model_extensions.norm_constraint import MaxL2FilterNorm
 from pylearn2.models.model import Model
@@ -2889,6 +2892,35 @@ class TanhConvNonlinearity(ConvNonlinearity):
         p = T.tanh(linear_response)
         return p
 
+class CosConvNonlinearity(ConvNonlinearity):
+
+    """
+    Cos nonlinearity class for convolutional layers.
+    """
+
+    def __init__(self, dim):
+        self.non_lin_name = "cos"
+        self.dim = dim
+
+    @wraps(ConvNonlinearity.apply)
+    def apply(self, linear_response):
+        """
+        Applies the tanh nonlinearity over the convolutional layer.
+        """
+        p = T.cos(linear_response)
+        p = p/np.sqrt(self.dim/2.0, dtype=config.floatX)
+        return p
+
+    @wraps(ConvNonlinearity.get_monitoring_channels_from_state)
+    def get_monitoring_channels_from_state(self, state, target,
+                                           cost_fn=None):
+
+        # ConvElemwise already handles kernel norms, so we don't need
+        # that here. Also, *_x_*_u turns out to be mostly useless for
+        # cosine activations -- they return the same values steadily
+        # across training and don't deviate between models at all.
+        return OrderedDict({})
+
 
 class ConvElemwise(Layer):
     """
@@ -3468,6 +3500,205 @@ class ConvRectifiedLinear(ConvElemwise):
                                                   output_normalization=on,
                                                   kernel_stride=kernel_stride,
                                                   monitor_style=monitor_style)
+
+def make_normal_conv2D(istd,
+                       input_space,
+                       output_space,
+                       kernel_shape,
+                       batch_size=None,
+                       subsample=(1, 1),
+                       border_mode = 'valid',
+                       message = "",
+                       rng = None):
+    """
+    .. todo::
+
+        WRITEME properly
+
+    Creates a CorrMM2D with random kernels
+
+    Parameters
+    ----------
+    irange : TODO
+    input_space : TODO
+    output_space : TODO
+    kernel_shape : 2D list or tuple
+    batch_size : int, optional
+    subsample : tuple, optional
+    border_mode : string, optional
+    message : string, optional
+    rng : optional
+    """
+
+    rng = make_np_rng(rng, default_seed, which_method='randn')
+
+    W = sharedX(rng.randn((output_space.num_channels,
+                           input_space.num_channels,
+                           kernel_shape[0],
+                           kernel_shape[1])) * istd)
+
+    return Conv2D(
+        filters=W,
+        batch_size=batch_size,
+        input_space=input_space,
+        output_axes=output_space.axes,
+        subsample=tuple(subsample),
+        border_mode=border_mode,
+        filters_shape=W.get_value(borrow=True).shape,
+        message=message
+    )
+
+class ConvCos(ConvElemwise):
+
+    """A convolutional cosine layer, based on theano's B01C formatted
+    convolution.
+
+    Parameters
+    ----------
+    output_channels : int
+        The number of output channels the layer should have.
+    kernel_shape : tuple
+        The shape of the convolution kernel.
+    pool_shape : tuple
+        The shape of the spatial max pooling. A two-tuple of ints.
+    pool_stride : tuple
+        The stride of the spatial max pooling. Also must be square.
+    layer_name : str
+        A name for this layer that will be prepended to monitoring channels
+        related to this layer.
+    istd : float
+        Specifies the standard deviation of the normal distribution that the 
+        weights are drawn from.
+    border_mode : str
+        A string indicating the size of the output:
+
+        - "full" : The output is the full discrete linear convolution of the
+            inputs.
+        - "valid" : The output consists only of those elements that do not
+            rely on the zero-padding. (Default)
+
+    include_prob : float
+        probability of including a weight element in the set of weights
+        initialized to U(-irange, irange). If not included it is initialized
+        to 0.
+    init_bias : float
+        All biases are initialized to this number
+    W_lr_scale : float
+        The learning rate on the weights for this layer is multiplied by this
+        scaling factor
+    b_lr_scale : float
+        The learning rate on the biases for this layer is multiplied by this
+        scaling factor
+    max_kernel_norm : float
+        If specifed, each kernel is constrained to have at most this norm.
+    pool_type :
+        The type of the pooling operation performed the the convolution.
+        Default pooling type is max-pooling.
+    tied_b : bool
+        If true, all biases in the same channel are constrained to be the
+        same as each other. Otherwise, each bias at each location is
+        learned independently.
+    detector_normalization : callable
+        See `output_normalization`
+    output_normalization : callable
+        if specified, should be a callable object. the state of the
+        network is optionally replaced with normalization(state) at each
+        of the 3 points in processing:
+
+        - detector: the rectifier units can be normalized prior to the
+            spatial pooling
+        - output: the output of the layer, after spatial pooling, can
+            be normalized as well
+
+    kernel_stride : tuple
+        The stride of the convolution kernel. A two-tuple of ints.
+
+    """
+
+    def __init__(self,
+                 output_channels,
+                 kernel_shape,
+                 pool_shape,
+                 pool_stride,
+                 layer_name,
+                 istd=None,
+                 border_mode='valid',
+                 include_prob=1.0,
+                 W_lr_scale=None,
+                 b_lr_scale=None,
+                 max_kernel_norm=None,
+                 pool_type='max',
+                 tied_b=False,
+                 detector_normalization=None,
+                 output_normalization=None,
+                 kernel_stride=(1, 1),
+                 monitor_style="classification"):
+
+        nonlinearity = CosConvNonlinearity(output_channels)
+
+        if (istd is None):
+            raise AssertionError("You must specify istd when calling the "
+                                 "constructor of ConvCos.")
+
+        # Make the biases random -- this is so that in expectation,
+        # the dot product of two different outputs will properly
+        # approximate a kernel.
+        init_bias = np.random.uniform(low=0., 
+                                      high=2*np.pi, 
+                                      size=(output_channels,))
+
+        # Alias the variables for pep8
+        mkn = max_kernel_norm
+        dn = detector_normalization
+        on = output_normalization
+
+        # Give irange=1./sparse_init=None to the superclass -- we'll
+        # override initialize_transformer, but the superclass
+        # constructor will pitch a fit if it doesn't get something
+        # exact.
+        super(ConvCos, self).__init__(output_channels,
+                                      kernel_shape,
+                                      layer_name,
+                                      nonlinearity,
+                                      irange=1.,
+                                      border_mode=border_mode,
+                                      sparse_init=None,
+                                      include_prob=include_prob,
+                                      init_bias=init_bias,
+                                      W_lr_scale=W_lr_scale,
+                                      b_lr_scale=b_lr_scale,
+                                      pool_shape=pool_shape,
+                                      pool_stride=pool_stride,
+                                      max_kernel_norm=mkn,
+                                      pool_type=pool_type,
+                                      tied_b=tied_b,
+                                      detector_normalization=dn,
+                                      output_normalization=on,
+                                      kernel_stride=kernel_stride,
+                                      monitor_style=monitor_style)
+
+    @wraps(ConvElemwise.initialize_transformer)
+    def initialize_transformer(self, rng):
+        """
+        This function initializes the transformer of the class. Re-running
+        this function will reset the transformer.
+
+        Parameters
+        ----------
+        rng : object
+            random number generator object.
+        """
+        if self.istd is not None:
+            self.transformer = conv2d.make_normal_conv2D(
+                istd=self.istd,
+                input_space=self.input_space,
+                output_space=self.detector_space,
+                kernel_shape=self.kernel_shape,
+                subsample=self.kernel_stride,
+                border_mode=self.border_mode,
+                rng=rng)
+        else:
+            raise ValueError('istd cannot be None')
 
 
 def pool_dnn(bc01, pool_shape, pool_stride, mode='max'):
