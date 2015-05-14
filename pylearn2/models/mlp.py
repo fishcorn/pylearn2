@@ -3596,7 +3596,7 @@ class ConvCos(ConvElemwise):
         If specifed, each kernel is constrained to have at most this norm.
     pool_type :
         The type of the pooling operation performed the the convolution.
-        Default pooling type is max-pooling.
+        Pooling is disabled by default.
     tied_b : bool
         If true, all biases in the same channel are constrained to be the
         same as each other. Otherwise, each bias at each location is
@@ -3621,16 +3621,16 @@ class ConvCos(ConvElemwise):
     def __init__(self,
                  output_channels,
                  kernel_shape,
-                 pool_shape,
-                 pool_stride,
                  layer_name,
+                 pool_shape=None,
+                 pool_stride=None,
                  istdev=None,
                  border_mode='valid',
                  include_prob=1.0,
                  W_lr_scale=None,
                  b_lr_scale=None,
                  max_kernel_norm=None,
-                 pool_type='max',
+                 pool_type=None,
                  tied_b=False,
                  detector_normalization=None,
                  output_normalization=None,
