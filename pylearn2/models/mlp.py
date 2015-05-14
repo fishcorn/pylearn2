@@ -3502,7 +3502,7 @@ class ConvRectifiedLinear(ConvElemwise):
                                                   kernel_stride=kernel_stride,
                                                   monitor_style=monitor_style)
 
-def make_normal_conv2D(istd,
+def make_normal_conv2D(istdev,
                        input_space,
                        output_space,
                        kernel_shape,
@@ -3537,7 +3537,7 @@ def make_normal_conv2D(istd,
     init_W = rng.randn(output_space.num_channels,
                        input_space.num_channels,
                        kernel_shape[0],
-                       kernel_shape[1]) * istd
+                       kernel_shape[1]) * istdev
     W = sharedX(init_W.astype(config.floatX))
 
     return Conv2D(
@@ -3569,7 +3569,7 @@ class ConvCos(ConvElemwise):
     layer_name : str
         A name for this layer that will be prepended to monitoring channels
         related to this layer.
-    istd : float
+    istdev : float
         Specifies the standard deviation of the normal distribution that the 
         weights are drawn from.
     border_mode : str
@@ -3624,7 +3624,7 @@ class ConvCos(ConvElemwise):
                  pool_shape,
                  pool_stride,
                  layer_name,
-                 istd=None,
+                 istdev=None,
                  border_mode='valid',
                  include_prob=1.0,
                  W_lr_scale=None,
@@ -3639,9 +3639,10 @@ class ConvCos(ConvElemwise):
 
         nonlinearity = CosConvNonlinearity(output_channels)
 
-        if (istd is None):
-            raise AssertionError("You must specify istd when calling the "
+        if (istdev is None):
+            raise AssertionError("You must specify istdev when calling the "
                                  "constructor of ConvCos.")
+        self.istdev = istdev
 
         # Make the biases random -- this is so that in expectation,
         # the dot product of two different outputs will properly
@@ -3694,9 +3695,9 @@ class ConvCos(ConvElemwise):
         rng : object
             random number generator object.
         """
-        if self.istd is not None:
+        if self.istdev is not None:
             self.transformer = make_normal_conv2D(
-                istd=self.istd,
+                istdev=self.istdev,
                 input_space=self.input_space,
                 output_space=self.detector_space,
                 kernel_shape=self.kernel_shape,
@@ -3704,7 +3705,7 @@ class ConvCos(ConvElemwise):
                 border_mode=self.border_mode,
                 rng=rng)
         else:
-            raise ValueError('istd cannot be None')
+            raise ValueError('istdev cannot be None')
 
 
 def pool_dnn(bc01, pool_shape, pool_stride, mode='max'):
