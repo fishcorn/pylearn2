@@ -60,6 +60,7 @@ from pylearn2.utils import wraps
 from pylearn2.utils import contains_inf
 from pylearn2.utils import isfinite
 from pylearn2.utils.data_specs import DataSpecsMapping
+from pylearn2.utils.rng import make_np_rng
 
 from pylearn2.expr.nnet import (elemwise_kl, kl, compute_precision,
                                 compute_recall, compute_f1)
@@ -3530,12 +3531,14 @@ def make_normal_conv2D(istd,
     rng : optional
     """
 
+    default_seed = [2015, 5, 9, 17]
     rng = make_np_rng(rng, default_seed, which_method='randn')
 
-    W = sharedX(rng.randn((output_space.num_channels,
-                           input_space.num_channels,
-                           kernel_shape[0],
-                           kernel_shape[1])) * istd)
+    init_W = rng.randn(output_space.num_channels,
+                       input_space.num_channels,
+                       kernel_shape[0],
+                       kernel_shape[1]) * istd
+    W = sharedX(init_W.astype(config.floatX))
 
     return Conv2D(
         filters=W,
@@ -3643,9 +3646,12 @@ class ConvCos(ConvElemwise):
         # Make the biases random -- this is so that in expectation,
         # the dot product of two different outputs will properly
         # approximate a kernel.
-        init_bias = np.random.uniform(low=0., 
-                                      high=2*np.pi, 
-                                      size=(output_channels,))
+        if tied_b:
+            size = (output_channels,)
+        else:
+            size = (output_channels,1,1)
+        init_bias = np.random.uniform(low=0., high=2*np.pi, size=size)
+        init_bias = init_bias.astype(config.floatX)
 
         # Alias the variables for pep8
         mkn = max_kernel_norm
@@ -3689,7 +3695,7 @@ class ConvCos(ConvElemwise):
             random number generator object.
         """
         if self.istd is not None:
-            self.transformer = conv2d.make_normal_conv2D(
+            self.transformer = make_normal_conv2D(
                 istd=self.istd,
                 input_space=self.input_space,
                 output_space=self.detector_space,
