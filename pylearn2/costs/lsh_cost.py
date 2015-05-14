@@ -14,6 +14,7 @@ from pylearn2.compat import OrderedDict
 
 from theano import tensor as T
 from theano import config
+import theano
 
 import numpy as np
 
@@ -44,21 +45,14 @@ class LSHCriterion(Cost):
         outputs = model.fprop(inputs)
         batch_size = model.batch_size/2
 
-        outputs_a = outputs[:batch_size]
-        outputs_b = outputs[batch_size:]
+        diffoutputs = outputs[:batch_size] - outputs[batch_size:]
+        difftargets = T.neq(targets[:batch_size], targets[batch_size:])
 
-        targets_a = targets[:batch_size]
-        targets_b = targets[batch_size:]
+        l2sq = T.sqr(diffoutputs).sum(axis=1, dtype=config.floatX, keepdims=True)
+        # Use this augmented norm becuase Theano isn't smart enough not to div by zero
+        mmnsq = T.sqr(self.m - T.sqrt(.0001 + l2sq))
 
-        difftargets = T.neq(targets_a, targets_b)
-        liketargets = 1 - difftargets
-
-        l2sq = T.sqr(outputs_a - outputs_b).sum(axis=1, keepdims=True)
-
-        likeloss = liketargets * l2sq 
-        diffloss = difftargets * T.sqr(T.maximum(0.0, self.m - T.sqrt(l2sq)))
-
-        loss = (likeloss + diffloss).sum(dtype=config.floatX)
+        loss = T.switch(difftargets, mmnsq, l2sq).sum(dtype=config.floatX)
 
         return loss
 
@@ -86,37 +80,35 @@ class LSHCriterion(Cost):
         outputs = model.fprop(inputs)
         batch_size = model.batch_size/2
 
-        outputs_a = outputs[:batch_size]
-        outputs_b = outputs[batch_size:]
-
-        targets_a = targets[:batch_size]
-        targets_b = targets[batch_size:]
-
-        difftargets = T.neq(targets_a, targets_b)
+        diffoutputs = outputs[:batch_size] - outputs[batch_size:]
+        difftargets = T.neq(targets[:batch_size], targets[batch_size:])
         liketargets = 1 - difftargets
 
-        l2sq = T.sqr(outputs_a - outputs_b).sum(axis=1, keepdims=True, dtype='float32')
+        l2sq = T.sqr(diffoutputs).sum(axis=1, dtype=config.floatX, keepdims=True)
         l2 = T.sqrt(l2sq)
+        # Use this augmented norm becuase Theano isn't smart enough not to div by zero
+        mmnsq = T.sqr(self.m - T.sqrt(.0001 + l2sq))
 
-        likeloss = liketargets * l2sq 
-        diffloss = difftargets * T.sqr(T.maximum(0.0, self.m - l2))
+        likeloss = T.switch(liketargets, l2sq, 0.)
+        diffloss = T.switch(difftargets, mmnsq, 0.) 
 
         rval['lsh_like_obj'] = likeloss.sum(dtype=config.floatX)
         rval['lsh_diff_obj'] = diffloss.sum(dtype=config.floatX)
 
-        likesum = liketargets.sum(dtype='int32').astype(config.floatX)
-        diffsum = difftargets.sum(dtype='int32').astype(config.floatX)
+        likesum = liketargets.sum(dtype=config.floatX)
+        diffsum = difftargets.sum(dtype=config.floatX)
 
-        hamm = (outputs_a*outputs_b < 0).sum(axis=1, keepdims=True, dtype='int32')
+        hamm = outputs[:batch_size] * outputs[batch_size:] < 0
+        hamm = hamm.sum(axis=1, keepdims=True, dtype=config.floatX)
         hmin = hamm.min()
         hmax = hamm.max()
 
-        rval['lsh_like_hamm_min']  = T.switch(liketargets, hamm, hmax).min().astype(config.floatX)
+        rval['lsh_like_hamm_min']  = T.switch(liketargets, hamm, hmax).min()
         rval['lsh_like_hamm_mean'] = (hamm * liketargets).sum(dtype=config.floatX)/likesum
-        rval['lsh_like_hamm_max']  = T.switch(liketargets, hamm, hmin).max().astype(config.floatX)
-        rval['lsh_diff_hamm_min']  = T.switch(difftargets, hamm, hmax).min().astype(config.floatX)
+        rval['lsh_like_hamm_max']  = T.switch(liketargets, hamm, hmin).max()
+        rval['lsh_diff_hamm_min']  = T.switch(difftargets, hamm, hmax).min()
         rval['lsh_diff_hamm_mean'] = (hamm * difftargets).sum(dtype=config.floatX)/diffsum
-        rval['lsh_diff_hamm_max']  = T.switch(difftargets, hamm, hmin).max().astype(config.floatX)
+        rval['lsh_diff_hamm_max']  = T.switch(difftargets, hamm, hmin).max()
 
         l2min = l2.min()
         l2max = l2.max()
