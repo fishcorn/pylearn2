@@ -22,11 +22,12 @@ import numpy as np
 class LSHCriterion(Cost):
     supervised = True
 
-    def __init__(self, m, dim):
+    def __init__(self, m, dim, interleaved=False):
         '''
         m: the threshold that inputs of different classes must be lower
         than in order to affect training.
         dim: must match the number of classes in the data.
+        interleaved: pair data in batch by adjacent pairs (True) or as two contiguous blocks (False)
 
         '''
         assert(m > 0)
@@ -34,6 +35,8 @@ class LSHCriterion(Cost):
 
         assert(dim > 0)
         self.dim = dim
+
+        self.interleaved = interleaved
 
     def expr(self, model, data, **kwargs):
         space, source = self.get_data_specs(model)
@@ -45,8 +48,12 @@ class LSHCriterion(Cost):
         outputs = model.fprop(inputs)
         batch_size = model.batch_size/2
 
-        diffoutputs = outputs[:batch_size] - outputs[batch_size:]
-        difftargets = T.neq(targets[:batch_size], targets[batch_size:])
+        if self.interleaved: 
+            diffoutputs = outputs[0::2] - outputs[1::2]
+            difftargets = T.neq(targets[0::2], targets[1::2])
+        else:
+            diffoutputs = outputs[:batch_size] - outputs[batch_size:]
+            difftargets = T.neq(targets[:batch_size], targets[batch_size:])
 
         l2sq = T.sqr(diffoutputs).sum(axis=1, dtype=config.floatX, keepdims=True)
         # Use this augmented norm becuase Theano isn't smart enough not to div by zero
@@ -80,8 +87,12 @@ class LSHCriterion(Cost):
         outputs = model.fprop(inputs)
         batch_size = model.batch_size/2
 
-        diffoutputs = outputs[:batch_size] - outputs[batch_size:]
-        difftargets = T.neq(targets[:batch_size], targets[batch_size:])
+        if self.interleaved: 
+            diffoutputs = outputs[0::2] - outputs[1::2]
+            difftargets = T.neq(targets[0::2], targets[1::2])
+        else:
+            diffoutputs = outputs[:batch_size] - outputs[batch_size:]
+            difftargets = T.neq(targets[:batch_size], targets[batch_size:])
         liketargets = 1 - difftargets
 
         l2sq = T.sqr(diffoutputs).sum(axis=1, dtype=config.floatX, keepdims=True)
@@ -98,7 +109,10 @@ class LSHCriterion(Cost):
         likesum = liketargets.sum(dtype=config.floatX)
         diffsum = difftargets.sum(dtype=config.floatX)
 
-        hamm = outputs[:batch_size] * outputs[batch_size:] < 0
+        if self.interleaved:
+            hamm = outputs[0::2] * outputs[1::2] < 0
+        else:
+            hamm = outputs[:batch_size] * outputs[batch_size:] < 0
         hamm = hamm.sum(axis=1, keepdims=True, dtype=config.floatX)
         hmin = hamm.min()
         hmax = hamm.max()
