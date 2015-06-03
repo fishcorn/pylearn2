@@ -54,8 +54,14 @@ class LSHCriterion(Cost):
         else:
             diffoutputs = outputs[:batch_size] - outputs[batch_size:]
             difftargets = T.neq(targets[:batch_size], targets[batch_size:])
+        difftargets = difftargets.flatten()
 
-        l2sq = T.sqr(diffoutputs).sum(axis=1, dtype=config.floatX, keepdims=True)
+        # Grab the number of dimensions from a dummy batch
+        output_space = model.get_output_space()
+        ndim = len(output_space.get_origin_batch(2).shape)
+        sum_axes = range(ndim)
+        sum_axes.remove(output_space.get_batch_axis())
+        l2sq = T.sqr(diffoutputs).sum(axis=sum_axes, dtype=config.floatX)
         # Use this augmented norm becuase Theano isn't smart enough not to div by zero
         mmnsq = T.sqr(self.m - T.sqrt(.0001 + l2sq))
 
@@ -93,9 +99,16 @@ class LSHCriterion(Cost):
         else:
             diffoutputs = outputs[:batch_size] - outputs[batch_size:]
             difftargets = T.neq(targets[:batch_size], targets[batch_size:])
+        difftargets = difftargets.flatten()
         liketargets = 1 - difftargets
 
-        l2sq = T.sqr(diffoutputs).sum(axis=1, dtype=config.floatX, keepdims=True)
+        # Grab the number of dimensions from a dummy batch
+        output_space = model.get_output_space()
+        ndim = len(output_space.get_origin_batch(2).shape)
+        batch_axis = output_space.get_batch_axis()
+        sum_axes = range(ndim)
+        sum_axes.remove(batch_axis)
+        l2sq = T.sqr(diffoutputs.sum(axis=sum_axes, dtype=config.floatX).flatten())
         l2 = T.sqrt(l2sq)
         # Use this augmented norm becuase Theano isn't smart enough not to div by zero
         mmnsq = T.sqr(self.m - T.sqrt(.0001 + l2sq))
@@ -113,29 +126,29 @@ class LSHCriterion(Cost):
             hamm = outputs[0::2] * outputs[1::2] < 0
         else:
             hamm = outputs[:batch_size] * outputs[batch_size:] < 0
-        hamm = hamm.sum(axis=1, keepdims=True, dtype=config.floatX)
+        hamm = hamm.sum(axis=sum_axes, dtype=config.floatX).flatten()
         hmin = hamm.min()
         hmax = hamm.max()
 
         rval['lsh_like_hamm_min']  = T.switch(liketargets, hamm, hmax).min()
-        rval['lsh_like_hamm_mean'] = (hamm * liketargets).sum(dtype=config.floatX)/likesum
+        rval['lsh_like_hamm_mean'] = hamm.dot(liketargets)/likesum
         rval['lsh_like_hamm_max']  = T.switch(liketargets, hamm, hmin).max()
         rval['lsh_diff_hamm_min']  = T.switch(difftargets, hamm, hmax).min()
-        rval['lsh_diff_hamm_mean'] = (hamm * difftargets).sum(dtype=config.floatX)/diffsum
+        rval['lsh_diff_hamm_mean'] = hamm.dot(difftargets)/diffsum
         rval['lsh_diff_hamm_max']  = T.switch(difftargets, hamm, hmin).max()
 
         l2min = l2.min()
         l2max = l2.max()
 
         rval['lsh_like_l2_min']  = T.switch(liketargets, l2, l2max).min() 
-        rval['lsh_like_l2_mean'] = (l2 * liketargets).sum(dtype=config.floatX)/likesum
+        rval['lsh_like_l2_mean'] = l2.dot(liketargets)/likesum
         rval['lsh_like_l2_max']  = T.switch(liketargets, l2, l2min).max() 
         rval['lsh_diff_l2_min']  = T.switch(difftargets, l2, l2max).min() 
-        rval['lsh_diff_l2_mean'] = (l2 * difftargets).sum(dtype=config.floatX)/diffsum
+        rval['lsh_diff_l2_mean'] = l2.dot(difftargets)/diffsum
         rval['lsh_diff_l2_max']  = T.switch(difftargets, l2, l2min).max() 
 
         # Hamming distance is just the size of the symmetric difference
-        pos = (outputs > 0).astype('int32')
+        pos = (outputs > 0).astype('int32').dimshuffle(batch_axis,*sum_axes).flatten(ndim=2)
         pos_sum = pos.sum(axis=1, keepdims=True)
         hamm_mat = pos_sum.T + pos_sum - 2*pos.dot(pos.T)
         # Add max to diagonal so that we don't pick identical points
@@ -162,7 +175,7 @@ class LSHCriterion(Cost):
         heights = prc[:-1] + prc[1:]
         rval['lsh_hamm_nn_map'] = widths.dot(heights)/2 # Trapezoid method
 
-        sqr = T.sqr(outputs)
+        sqr = T.sqr(outputs).dimshuffle(batch_axis,*sum_axes).flatten(ndim=2)
         sqr_sum = sqr.sum(axis=1, keepdims=True)
         l2_mat = sqr_sum.T + sqr_sum - 2*sqr.dot(sqr.T)
         # Add max to diagonal so that we don't pick identical points
