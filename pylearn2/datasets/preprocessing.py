@@ -1720,10 +1720,7 @@ class RGB_YUV(ExamplewisePreprocessor):
                 transformed = convert_axes(transformed,
                                            dataset.view_converter.axes,
                                            ['b', 0, 1, 'c'])
-                transformed = transformed.reshape(transformed.shape[0],
-                                                  transformed.shape[1] *
-                                                  transformed.shape[2] *
-                                                  transformed.shape[3])
+                transformed = dataset.view_converter.topo_view_to_design_mat(transformed)
                 dataset.X[i:stop] = transformed
             else:
                 dataset.set_topological_view(transformed,
