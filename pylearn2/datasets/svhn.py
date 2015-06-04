@@ -380,8 +380,8 @@ class SVHN_On_Memory(dense_design_matrix.DenseDesignMatrix):
 
             data = load(path)
             data_x = numpy.cast[config.floatX](data['X'])
-            import ipdb
-            ipdb.set_trace()
+            # import ipdb
+            # ipdb.set_trace()
             data_y = data['y']
             del data
             gc.collect()
@@ -496,5 +496,10 @@ class SVHN_On_Memory(dense_design_matrix.DenseDesignMatrix):
             rng.shuffle(index)
             data_x = data_x[index, :]
             data_y = data_y[index, :]
+
+        # .mat labels for SVHN are in range [1,10]
+        # So subtract 1 to map labels to range [0,9]
+        # This is consistent with range for MNIST dataset labels
+        data_y = data_y - 1
 
         return data_x, data_y
