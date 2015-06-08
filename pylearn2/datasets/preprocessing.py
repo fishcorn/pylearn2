@@ -1212,19 +1212,39 @@ class ZCA(Preprocessor):
                       "preprocessed datasets to the others, rather than "
                       "preprocessing the data independently in each "
                       "location.")
+
+        if ((n_components is None or n_components <= 0) and
+            (n_drop_components is None or n_drop_components < 0)):
+            raise ValueError('Either n_components should be positive '
+                             'or n_drop_components should be nonnegative')
+
+        if n_components > 0 and n_drop_components > 0:
+            raise ValueError('Only one of n_components or n_drop_components '
+                             'should be specified')
+
+        if n_components is None:
+            self.n_components = 0
+        else:
+            self.n_components = max(0, n_components)
+
+        if n_drop_components is None:
+            self.n_drop_components = 0
+        else:
+            self.n_drop_components = max(0, n_drop_components)
+
         # TODO: test to see if differences across platforms
         # e.g., preprocessing STL-10 patches in LISA lab versus on
         # Ian's Ubuntu 11.04 machine
         # are due to the problem having a bad condition number or due to
         # different version numbers of scipy or something
-        self.n_components = n_components
-        self.n_drop_components = n_drop_components
         self.copy = True
         self.filter_bias = numpy.cast[theano.config.floatX](filter_bias)
         self.has_fit_ = False
         self.store_inverse = store_inverse
         self.P_ = None  # set by fit()
         self.inv_P_ = None  # set by fit(), if self.store_inverse is True
+        self.eigs_ = None
+        self.eigv_ = None
 
         # Analogous to DenseDesignMatrix.design_loc. If not None, the
         # matrices P_ and inv_P_ will be saved together in <save_path>
@@ -1312,6 +1332,57 @@ class ZCA(Preprocessor):
                           'preprocessor run')
             return numpy.dot(mat * diags, mat.T)
 
+    @staticmethod
+    def _gpu_abdbt(mat_a, mat_b, diags):
+        """
+        Performs the matrix multiplication A * B * D * B^T, assuming that D
+        has the smaller dimension out of B and D.
+
+        First tries to do this on the GPU. If this throws a MemoryError, it
+        falls back to the CPU, with a warning message.
+
+        Parameters
+        ----------
+        mat : WRITEME
+        diags : WRITEME
+        """
+
+        floatX = theano.config.floatX
+
+        # compile theano function
+        if not hasattr(ZCA._gpu_mdmt, 'theano_func'):
+            t_mat_a = theano.tensor.matrix('A')
+            t_mat_b = theano.tensor.matrix('B')
+            t_diags = theano.tensor.vector('D')
+            result = theano.tensor.dot(t_mat_a, t_mat_b * t_diags)
+            result = theano.tensor.dot(result, t_mat_b.T)
+            ZCA._gpu_abdbt.theano_func = theano.function(
+                [t_mat_a, t_mat_b, t_diags],
+                result,
+                allow_input_downcast=True)
+
+        try:
+            # function()-call above had to downcast the data. Emit warnings.
+            if str(mat_a.dtype) != floatX:
+                warnings.warn('Implicitly converting mat from dtype=%s to '
+                              '%s for gpu' % (mat_a.dtype, floatX))
+            if str(mat_b.dtype) != floatX:
+                warnings.warn('Implicitly converting mat from dtype=%s to '
+                              '%s for gpu' % (mat_b.dtype, floatX))
+            if str(diags.dtype) != floatX:
+                warnings.warn('Implicitly converting diag from dtype=%s to '
+                              '%s for gpu' % (diags.dtype, floatX))
+
+            return ZCA._gpu_abdbt.theano_func(mat_a, mat_b, diags)
+
+        except MemoryError:
+            # fall back to cpu
+            warnings.warn('A * B * D * B^T was too big to fit on GPU. '
+                          'Re-doing with CPU. Consider using '
+                          'THEANO_FLAGS="device=cpu" for your next '
+                          'preprocessor run')
+            return numpy.dot(numpy.dot(mat_a, mat_b * diags), mat_b.T)
+
     def set_matrices_save_path(self, matrices_save_path):
         """
         Analogous to DenseDesignMatrix.use_design_loc().
@@ -1353,14 +1424,13 @@ class ZCA(Preprocessor):
         """
         result = copy.copy(self.__dict__)  # shallow copy
         if self.matrices_save_path is not None:
-            matrices = {'P_': self.P_}
-            if self.inv_P_ is not None:
-                matrices['inv_P_'] = self.inv_P_
-
+            matrices = {'P_':self.P_, 'inv_P_':self.inv_P_,
+                        'eigs_':self.eigs_, 'eigv_':self.eigv_ }
+            matrices = { k:v for k,v in matrices.items() if v is not None }
             numpy.savez(self.matrices_save_path, **matrices)
 
             # Removes the matrices from the dictionary to be pickled.
-            for key, matrix in matrices.items():
+            for key in matrices:
                 del result[key]
 
         return result
@@ -1376,6 +1446,8 @@ class ZCA(Preprocessor):
             from disk.
         """
 
+        self.__dict__.update(P_=None, inv_P_=None, eigs_=None, eigv_=None)
+
         # Patch old pickle files
         if 'matrices_save_path' not in state:
             state['matrices_save_path'] = None
@@ -1385,13 +1457,10 @@ class ZCA(Preprocessor):
 
             # puts matrices' items into state, overriding any colliding keys in
             # state.
-            state = dict(state.items() + matrices.items())
+            state.update(matrices)
             del matrices
 
         self.__dict__.update(state)
-
-        if not hasattr(self, "inv_P_"):
-            self.inv_P_ = None
 
     def fit(self, X):
         """
@@ -1419,7 +1488,32 @@ class ZCA(Preprocessor):
         self.mean_ = numpy.mean(X, axis=0)
         X -= self.mean_
 
-        log.info('computing zca of a {0} matrix'.format(X.shape))
+        n_features = X.shape[1]
+        if self.n_components > 0:
+            if self.n_components > n_features:
+                log.info('Number of components {0} is greater than the '
+                         'number of features, truncating to number of '
+                         'features ({1}).'
+                         ''.format(self.n_components, n_features))
+                n_req_comp = n_features
+            else:
+                n_req_comp = self.n_components
+        else:
+            if self.n_drop_components >= n_features:
+                raise ValueError('Number of dropped components {0} is at '
+                                 'least the number of features, resulting '
+                                 'in no components.'
+                                 ''.format(self.n_drop_components))
+            n_req_comp = n_features - self.n_drop_components
+
+        if n_req_comp > n_samples:
+            log.info('Number of components {0} is greater than the number '
+                     'of samples, truncating to number of samples ({1}).'
+                     ''.format(n_req_comp, n_samples))
+            n_req_comp = n_samples
+
+        log.info('computing zca of a {0} matrix with {1} '
+                 'components'.format(X.shape, n_req_comp))
         t1 = time.time()
 
         bias = self.filter_bias * scipy.sparse.identity(X.shape[1],
@@ -1437,39 +1531,36 @@ class ZCA(Preprocessor):
         assert not contains_nan(eigs)
         assert not contains_nan(eigv)
 
-        if self.n_components and self.n_drop_components:
-            raise ValueError('Either n_components or n_drop_components'
-                             'should be specified')
-
+        # Sort eigenvalues in case linalg.eigh didn't
         idx = numpy.argsort(eigs)
-
-        if self.n_components:
-            idx = idx[-self.n_components:]
-
-        if self.n_drop_components:
-            idx = idx[self.n_drop_components:]
+        # Keep the highest ones
+        idx = idx[-n_req_comp:]
 
         eigs = eigs[idx]
         eigv = eigv[:, idx]
         assert eigs.min() > 0
 
-        t1 = time.time()
+        self.P_ = None
+        self.eigs_ = None
+        self.eigv_ = None
+        if n_req_comp*2 > n_features:
+            sqrt_eigs = numpy.sqrt(eigs)
+            try:
+                self.P_ = ZCA._gpu_mdmt(eigv, 1.0 / sqrt_eigs)
+            except MemoryError:
+                warnings.warn()
+                self.P_ = numpy.dot(eigv * (1.0 / sqrt_eigs), eigv.T)
+            assert not contains_nan(self.P_)
 
-        sqrt_eigs = numpy.sqrt(eigs)
-        try:
-            self.P_ = ZCA._gpu_mdmt(eigv, 1.0 / sqrt_eigs)
-        except MemoryError:
-            warnings.warn()
-            self.P_ = numpy.dot(eigv * (1.0 / sqrt_eigs), eigv.T)
-
-        t2 = time.time()
-        assert not contains_nan(self.P_)
-        self.has_fit_ = True
-
-        if self.store_inverse:
-            self.inv_P_ = ZCA._gpu_mdmt(eigv, sqrt_eigs)
+            if self.store_inverse:
+                self.inv_P_ = ZCA._gpu_mdmt(eigv, sqrt_eigs)
+            else:
+                self.inv_P_ = None
         else:
-            self.inv_P_ = None
+            self.eigs_ = numpy.sqrt(eigs)
+            self.eigv_ = eigv
+
+        self.has_fit_ = True
 
     def apply(self, dataset, can_fit=False):
         """
@@ -1477,17 +1568,17 @@ class ZCA(Preprocessor):
 
             WRITEME
         """
-        # Compiles apply.x_minus_mean_times_p(), a numeric Theano function that
-        # evauates dot(X - mean, P)
-        if not hasattr(ZCA, '_x_minus_mean_times_p'):
-            x_symbol = tensor.matrix('X')
-            mean_symbol = tensor.vector('mean')
-            p_symbol = tensor.matrix('P_')
-            new_x_symbol = tensor.dot(x_symbol - mean_symbol, p_symbol)
-            ZCA._x_minus_mean_times_p = theano.function([x_symbol,
-                                                         mean_symbol,
-                                                         p_symbol],
-                                                        new_x_symbol)
+        # # Compiles apply.x_minus_mean_times_p(), a numeric Theano function that
+        # # evauates dot(X - mean, P)
+        # if not hasattr(ZCA, '_x_minus_mean_times_p'):
+        #     x_symbol = tensor.matrix('X')
+        #     mean_symbol = tensor.vector('mean')
+        #     p_symbol = tensor.matrix('P_')
+        #     new_x_symbol = tensor.dot(x_symbol - mean_symbol, p_symbol)
+        #     ZCA._x_minus_mean_times_p = theano.function([x_symbol,
+        #                                                  mean_symbol,
+        #                                                  p_symbol],
+        #                                                 new_x_symbol)
 
         X = dataset.get_design_matrix()
         assert X.dtype in ['float32', 'float64']
@@ -1495,7 +1586,10 @@ class ZCA(Preprocessor):
             assert can_fit
             self.fit(X)
 
-        new_X = ZCA._gpu_matrix_dot(X - self.mean_, self.P_)
+        if self.P_ is not None:
+            new_X = ZCA._gpu_matrix_dot(X - self.mean_, self.P_)
+        elif self.eigv_ is not None and self.eigs_ is not None:
+            new_X = ZCA._gpu_abdbt(X - self.mean_, self.eigv_, 1.0/self.eigs_)
         dataset.set_design_matrix(new_X)
 
     def inverse(self, X):
@@ -1506,7 +1600,7 @@ class ZCA(Preprocessor):
         """
         assert X.ndim == 2
 
-        if self.inv_P_ is None:
+        if self.inv_P_ is None and self.P_ is not None:
             warnings.warn("inv_P_ was None. Computing "
                           "inverse of P_ now. This will take "
                           "some time. For efficiency, it is recommended that "
@@ -1516,7 +1610,9 @@ class ZCA(Preprocessor):
             self.inv_P_ = numpy.linalg.inv(self.P_)
             log.info('...done inverting')
 
-        return self._gpu_matrix_dot(X, self.inv_P_) + self.mean_
+        if self.inv_P_ is not None:
+            return ZCA._gpu_matrix_dot(X, self.inv_P_) + self.mean_
+        return self._gpu_abdbt(X, self.eigv_, self.eigs_) + self.mean_
 
 
 class LeCunLCN(ExamplewisePreprocessor):
