@@ -410,6 +410,7 @@ class ExtractPatches(Preprocessor):
         rng = copy.copy(self.start_rng)
 
         X = dataset.get_topological_view()
+        y = dataset.y
 
         num_topological_dimensions = len(X.shape) - 2
 
@@ -422,16 +423,20 @@ class ExtractPatches(Preprocessor):
 
         # batch size
         output_shape = [self.num_patches]
+        out_y_shape = [self.num_patches]
         # topological dimensions
         for dim in self.patch_shape:
             output_shape.append(dim)
         # number of channels
         output_shape.append(X.shape[-1])
+        out_y_shape.append(y.shape[-1])
         output = numpy.zeros(output_shape, dtype=X.dtype)
+        out_y = numpy.zeros(out_y_shape, dtype=y.dtype)
         channel_slice = slice(0, X.shape[-1])
         for i in xrange(self.num_patches):
             args = []
             args.append(rng.randint(X.shape[0]))
+            out_y[i,:] = dataset.y[args[0],:]
 
             for j in xrange(num_topological_dimensions):
                 max_coord = X.shape[j + 1] - self.patch_shape[j]
@@ -440,7 +445,7 @@ class ExtractPatches(Preprocessor):
             args.append(channel_slice)
             output[i, :] = X[args]
         dataset.set_topological_view(output)
-        dataset.y = None
+        dataset.y = out_y
 
 
 class ExamplewiseUnitNormBlock(Block):
