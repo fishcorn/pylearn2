@@ -3581,8 +3581,6 @@ class ConvCos(ConvElemwise):
         probability of including a weight element in the set of weights
         initialized to U(-irange, irange). If not included it is initialized
         to 0.
-    init_bias : float
-        All biases are initialized to this number
     W_lr_scale : float
         The learning rate on the weights for this layer is multiplied by this
         scaling factor
@@ -3642,7 +3640,7 @@ class ConvCos(ConvElemwise):
 
         # Make the biases random -- this is so that in expectation,
         # the dot product of two different outputs will properly
-        # approximate a kernel.
+        # approximate a kernel (at least initially).
         if tied_b:
             size = (output_channels,)
         else:
