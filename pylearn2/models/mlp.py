@@ -31,13 +31,10 @@ from pylearn2.expr.probabilistic_max_pooling import max_pool_channels
 if cuda_enabled and dnn_available():
     try:
         from pylearn2.linear import cudnn2d as conv2d
-        from pylearn2.linear.cudnn2d import Cudnn2d as Conv2D
     except ImportError:
         from pylearn2.linear import conv2d
-        from pylearn2.linear.conv2d import Conv2D
 else:
     from pylearn2.linear import conv2d
-    from pylearn2.linear.conv2d import Conv2D
 from pylearn2.linear.matrixmul import MatrixMul
 from pylearn2.model_extensions.norm_constraint import MaxL2FilterNorm
 from pylearn2.models.model import Model
@@ -60,7 +57,6 @@ from pylearn2.utils import wraps
 from pylearn2.utils import contains_inf
 from pylearn2.utils import isfinite
 from pylearn2.utils.data_specs import DataSpecsMapping
-from pylearn2.utils.rng import make_np_rng
 
 from pylearn2.expr.nnet import (elemwise_kl, kl, compute_precision,
                                 compute_recall, compute_f1)
@@ -3553,55 +3549,6 @@ class ConvRectifiedLinear(ConvElemwise):
                                                   kernel_stride=kernel_stride,
                                                   monitor_style=monitor_style)
 
-def make_normal_conv2D(istdev,
-                       input_space,
-                       output_space,
-                       kernel_shape,
-                       batch_size=None,
-                       subsample=(1, 1),
-                       border_mode = 'valid',
-                       message = "",
-                       rng = None):
-    """
-    .. todo::
-
-        WRITEME properly
-
-    Creates a CorrMM2D with random kernels
-
-    Parameters
-    ----------
-    irange : TODO
-    input_space : TODO
-    output_space : TODO
-    kernel_shape : 2D list or tuple
-    batch_size : int, optional
-    subsample : tuple, optional
-    border_mode : string, optional
-    message : string, optional
-    rng : optional
-    """
-
-    default_seed = [2015, 5, 9, 17]
-    rng = make_np_rng(rng, default_seed, which_method='randn')
-
-    init_W = rng.randn(output_space.num_channels,
-                       input_space.num_channels,
-                       kernel_shape[0],
-                       kernel_shape[1]) * istdev
-    W = sharedX(init_W.astype(config.floatX))
-
-    return Conv2D(
-        filters=W,
-        batch_size=batch_size,
-        input_space=input_space,
-        output_axes=output_space.axes,
-        subsample=tuple(subsample),
-        border_mode=border_mode,
-        filters_shape=W.get_value(borrow=True).shape,
-        message=message
-    )
-
 class ConvCos(ConvElemwise):
 
     """A convolutional cosine layer, based on theano's B01C formatted
@@ -3620,9 +3567,8 @@ class ConvCos(ConvElemwise):
     layer_name : str
         A name for this layer that will be prepended to monitoring channels
         related to this layer.
-    istdev : float
-        Specifies the standard deviation of the normal distribution that the 
-        weights are drawn from.
+    irange : float
+        Initialize each weight randomly in U(-irange, irange).
     border_mode : str
         A string indicating the size of the output:
 
@@ -3673,9 +3619,9 @@ class ConvCos(ConvElemwise):
                  output_channels,
                  kernel_shape,
                  layer_name,
+                 irange,
                  pool_shape=None,
                  pool_stride=None,
-                 istdev=None,
                  border_mode='valid',
                  include_prob=1.0,
                  W_lr_scale=None,
@@ -3690,10 +3636,9 @@ class ConvCos(ConvElemwise):
 
         nonlinearity = CosConvNonlinearity(output_channels)
 
-        if (istdev is None):
-            raise AssertionError("You must specify istdev when calling the "
+        if (irange is None):
+            raise AssertionError("You must specify irange when calling the "
                                  "constructor of ConvCos.")
-        self.istdev = istdev
 
         # Make the biases random -- this is so that in expectation,
         # the dot product of two different outputs will properly
@@ -3710,15 +3655,11 @@ class ConvCos(ConvElemwise):
         dn = detector_normalization
         on = output_normalization
 
-        # Give irange=1./sparse_init=None to the superclass -- we'll
-        # override initialize_transformer, but the superclass
-        # constructor will pitch a fit if it doesn't get something
-        # exact.
         super(ConvCos, self).__init__(output_channels,
                                       kernel_shape,
                                       layer_name,
                                       nonlinearity,
-                                      irange=1.,
+                                      irange=irange,
                                       border_mode=border_mode,
                                       sparse_init=None,
                                       include_prob=include_prob,
@@ -3734,30 +3675,6 @@ class ConvCos(ConvElemwise):
                                       output_normalization=on,
                                       kernel_stride=kernel_stride,
                                       monitor_style=monitor_style)
-
-    @wraps(ConvElemwise.initialize_transformer)
-    def initialize_transformer(self, rng):
-        """
-        This function initializes the transformer of the class. Re-running
-        this function will reset the transformer.
-
-        Parameters
-        ----------
-        rng : object
-            random number generator object.
-        """
-        if self.istdev is not None:
-            self.transformer = make_normal_conv2D(
-                istdev=self.istdev,
-                input_space=self.input_space,
-                output_space=self.detector_space,
-                kernel_shape=self.kernel_shape,
-                subsample=self.kernel_stride,
-                border_mode=self.border_mode,
-                rng=rng)
-        else:
-            raise ValueError('istdev cannot be None')
-
 
 def pool_dnn(bc01, pool_shape, pool_stride, mode='max'):
     """
