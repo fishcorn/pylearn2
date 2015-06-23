@@ -1544,16 +1544,22 @@ class ZCA(Preprocessor):
         self.eigs_ = None
         self.eigv_ = None
         if n_req_comp*2 > n_features:
+            t1 = time.time()
             sqrt_eigs = numpy.sqrt(eigs)
             try:
                 self.P_ = ZCA._gpu_mdmt(eigv, 1.0 / sqrt_eigs)
             except MemoryError:
                 warnings.warn()
                 self.P_ = numpy.dot(eigv * (1.0 / sqrt_eigs), eigv.T)
+            t2 = time.time()
+            log.info("projection matrix took {0} seconds".format(t2 - t1))
             assert not contains_nan(self.P_)
 
             if self.store_inverse:
+                t1 = time.time()
                 self.inv_P_ = ZCA._gpu_mdmt(eigv, sqrt_eigs)
+                t2 = time.time()
+                log.info("inverse matrix took {0} seconds".format(t2 - t1))
             else:
                 self.inv_P_ = None
         else:
@@ -1586,10 +1592,13 @@ class ZCA(Preprocessor):
             assert can_fit
             self.fit(X)
 
+        t1 = time.time()
         if self.P_ is not None:
             new_X = ZCA._gpu_matrix_dot(X - self.mean_, self.P_)
         elif self.eigv_ is not None and self.eigs_ is not None:
             new_X = ZCA._gpu_abdbt(X - self.mean_, self.eigv_, 1.0/self.eigs_)
+        t2 = time.time()
+        log.info("application took {0} seconds".format(t2 - t1))
         dataset.set_design_matrix(new_X)
 
     def inverse(self, X):
