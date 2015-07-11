@@ -2970,6 +2970,37 @@ class CosConvNonlinearity(ConvNonlinearity):
         return OrderedDict({})
 
 
+class TriwaveConvNonlinearity(ConvNonlinearity):
+
+    """
+    Cos nonlinearity class for convolutional layers.
+    """
+
+    def __init__(self, dim):
+        self.non_lin_name = "cos"
+        self.dim = dim
+
+    @wraps(ConvNonlinearity.apply)
+    def apply(self, linear_response):
+        """
+        Applies the tanh nonlinearity over the convolutional layer.
+        """
+        p = linear_response / (2*np.pi)
+        p = 1 - 2*T.abs_(2*(p - T.floor(p + 0.5)))
+        p = p/np.sqrt(self.dim/2.0, dtype=config.floatX)
+        return p
+
+    @wraps(ConvNonlinearity.get_monitoring_channels_from_state)
+    def get_monitoring_channels_from_state(self, state, target,
+                                           cost_fn=None):
+
+        # ConvElemwise already handles kernel norms, so we don't need
+        # that here. Also, *_x_*_u turns out to be mostly useless for
+        # cosine activations -- they return the same values steadily
+        # across training and don't deviate between models at all.
+        return OrderedDict({})
+
+
 class ConvElemwise(Layer):
     """
     Generic convolutional elemwise layer.
@@ -3549,9 +3580,9 @@ class ConvRectifiedLinear(ConvElemwise):
                                                   kernel_stride=kernel_stride,
                                                   monitor_style=monitor_style)
 
-class ConvCos(ConvElemwise):
+class ConvPeriodic(ConvElemwise):
 
-    """A convolutional cosine layer, based on theano's B01C formatted
+    """A convolutional periodic layer, based on theano's B01C formatted
     convolution.
 
     Parameters
@@ -3614,6 +3645,7 @@ class ConvCos(ConvElemwise):
     """
 
     def __init__(self,
+                 nonlinearity,
                  output_channels,
                  kernel_shape,
                  layer_name,
@@ -3632,11 +3664,9 @@ class ConvCos(ConvElemwise):
                  kernel_stride=(1, 1),
                  monitor_style="classification"):
 
-        nonlinearity = CosConvNonlinearity(output_channels)
-
         if (irange is None):
             raise AssertionError("You must specify irange when calling the "
-                                 "constructor of ConvCos.")
+                                 "constructor of ConvPeriodic.")
 
         # Make the biases random -- this is so that in expectation,
         # the dot product of two different outputs will properly
@@ -3653,26 +3683,62 @@ class ConvCos(ConvElemwise):
         dn = detector_normalization
         on = output_normalization
 
-        super(ConvCos, self).__init__(output_channels,
+        super(ConvPeriodic, self).__init__(output_channels,
+                                           kernel_shape,
+                                           layer_name,
+                                           nonlinearity,
+                                           irange=irange,
+                                           border_mode=border_mode,
+                                           sparse_init=None,
+                                           include_prob=include_prob,
+                                           init_bias=init_bias,
+                                           W_lr_scale=W_lr_scale,
+                                           b_lr_scale=b_lr_scale,
+                                           pool_shape=pool_shape,
+                                           pool_stride=pool_stride,
+                                           max_kernel_norm=mkn,
+                                           pool_type=pool_type,
+                                           tied_b=tied_b,
+                                           detector_normalization=dn,
+                                           output_normalization=on,
+                                           kernel_stride=kernel_stride,
+                                           monitor_style=monitor_style)
+
+class ConvCos(ConvPeriodic):
+
+    def __init__(self,
+                 output_channels,
+                 kernel_shape,
+                 layer_name,
+                 irange,
+                 **kwargs):
+
+        nonlinearity = CosConvNonlinearity(output_channels)
+
+        super(ConvCos, self).__init__(nonlinearity,
+                                      output_channels,
                                       kernel_shape,
                                       layer_name,
-                                      nonlinearity,
-                                      irange=irange,
-                                      border_mode=border_mode,
-                                      sparse_init=None,
-                                      include_prob=include_prob,
-                                      init_bias=init_bias,
-                                      W_lr_scale=W_lr_scale,
-                                      b_lr_scale=b_lr_scale,
-                                      pool_shape=pool_shape,
-                                      pool_stride=pool_stride,
-                                      max_kernel_norm=mkn,
-                                      pool_type=pool_type,
-                                      tied_b=tied_b,
-                                      detector_normalization=dn,
-                                      output_normalization=on,
-                                      kernel_stride=kernel_stride,
-                                      monitor_style=monitor_style)
+                                      irange,
+                                      **kwargs)
+
+class ConvTriangleWave(ConvPeriodic):
+
+    def __init__(self,
+                 output_channels,
+                 kernel_shape,
+                 layer_name,
+                 irange,
+                 **kwargs):
+
+        nonlinearity = TriwaveConvNonlinearity(output_channels)
+
+        super(ConvTriangleWave, self).__init__(nonlinearity,
+                                               output_channels,
+                                               kernel_shape,
+                                               layer_name,
+                                               irange,
+                                               **kwargs)
 
 def pool_dnn(bc01, pool_shape, pool_stride, mode='max'):
     """
