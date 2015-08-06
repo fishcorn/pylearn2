@@ -22,19 +22,25 @@ import numpy as np
 class LSHCriterion(Cost):
     supervised = True
 
-    def __init__(self, m, dim, interleaved=False):
+    def __init__(self, m, dim, interleaved=False, thresh=0.0, sqrt_bias=1e-4):
         '''
         m: the threshold that inputs of different classes must be lower
         than in order to affect training.
         dim: must match the number of classes in the data.
         interleaved: pair data in batch by adjacent pairs (True) or as two contiguous blocks (False)
-
+        thresh: The value used for binarizing output for Hamming metrics
+        sqrt_bias: constant added to norm squared value so that sqrt doesn't produce a singularity when norm squared == 0
         '''
         assert(m > 0)
         self.m = m
 
         assert(dim > 0)
         self.dim = dim
+
+        assert(sqrt_bias > 0)
+        self.sqrt_bias = sqrt_bias
+
+        self.thresh = thresh
 
         self.interleaved = interleaved
 
@@ -63,7 +69,7 @@ class LSHCriterion(Cost):
         sum_axes.remove(output_space.get_batch_axis())
         l2sq = T.sqr(diffoutputs).sum(axis=sum_axes, dtype=config.floatX)
         # Use this augmented norm becuase Theano isn't smart enough not to div by zero
-        mmnsq = T.sqr(self.m - T.sqrt(.0001 + l2sq))
+        mmnsq = T.sqr(self.m - T.sqrt(self.sqrt_bias + l2sq))
 
         loss = T.switch(difftargets, mmnsq, l2sq).sum(dtype=config.floatX)
 
@@ -111,7 +117,7 @@ class LSHCriterion(Cost):
         l2sq = T.sqr(diffoutputs.sum(axis=sum_axes, dtype=config.floatX).flatten())
         l2 = T.sqrt(l2sq)
         # Use this augmented norm becuase Theano isn't smart enough not to div by zero
-        mmnsq = T.sqr(self.m - T.sqrt(.0001 + l2sq))
+        mmnsq = T.sqr(self.m - T.sqrt(self.sqrt_bias + l2sq))
 
         likeloss = T.switch(liketargets, l2sq, 0.)
         diffloss = T.switch(difftargets, mmnsq, 0.) 
@@ -122,10 +128,11 @@ class LSHCriterion(Cost):
         likesum = liketargets.sum(dtype=config.floatX)
         diffsum = difftargets.sum(dtype=config.floatX)
 
+        hamm = (outputs > self.thresh)
         if self.interleaved:
-            hamm = outputs[0::2] * outputs[1::2] < 0
+            hamm = T.neq(hamm[0::2], hamm[1::2])
         else:
-            hamm = outputs[:batch_size] * outputs[batch_size:] < 0
+            hamm = T.neq(hamm[:batch_size], hamm[batch_size:])
         hamm = hamm.sum(axis=sum_axes, dtype=config.floatX).flatten()
         hmin = hamm.min()
         hmax = hamm.max()

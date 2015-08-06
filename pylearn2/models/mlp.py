@@ -2297,12 +2297,25 @@ class Cos(Linear):
         row_norms = T.sqrt(sq_W.sum(axis=1))
         col_norms = T.sqrt(sq_W.sum(axis=0))
 
+        # Check the input to the cosine, to see how many periods
+        # are represented in the batch
+
+        z = self._linear_part(state_below)
+        batch_hz = T.ptp(z, axis=0) / (2*np.pi)
+        batch_peaks = T.floor(z.max(axis=0)/np.pi) - T.floor(z.min(axis=0)/np.pi)
+
         rval = OrderedDict([('row_norms_min',  row_norms.min()),
                             ('row_norms_mean', row_norms.mean()),
                             ('row_norms_max',  row_norms.max()),
                             ('col_norms_min',  col_norms.min()),
                             ('col_norms_mean', col_norms.mean()),
-                            ('col_norms_max',  col_norms.max()), ])
+                            ('col_norms_max',  col_norms.max()),
+                            ('batch_hz_min',  batch_hz.min()),
+                            ('batch_hz_mean', batch_hz.mean()),
+                            ('batch_hz_max',  batch_hz.max()),
+                            ('batch_peaks_min',  batch_peaks.min()),
+                            ('batch_peaks_mean', batch_peaks.mean()),
+                            ('batch_peaks_max',  batch_peaks.max()), ])
 
         return rval
 
@@ -2347,12 +2360,25 @@ class TriangleWave(Linear):
         row_norms = T.sqrt(sq_W.sum(axis=1))
         col_norms = T.sqrt(sq_W.sum(axis=0))
 
+        # Check the input to the cosine, to see how many periods
+        # are represented in the batch
+
+        z = self._linear_part(state_below)
+        batch_hz = T.ptp(z, axis=0) / (2*np.pi)
+        batch_peaks = T.floor(z.max(axis=0)/np.pi) - T.floor(z.min(axis=0)/np.pi)
+
         rval = OrderedDict([('row_norms_min',  row_norms.min()),
                             ('row_norms_mean', row_norms.mean()),
                             ('row_norms_max',  row_norms.max()),
                             ('col_norms_min',  col_norms.min()),
                             ('col_norms_mean', col_norms.mean()),
-                            ('col_norms_max',  col_norms.max()), ])
+                            ('col_norms_max',  col_norms.max()),
+                            ('batch_hz_min',  batch_hz.min()),
+                            ('batch_hz_mean', batch_hz.mean()),
+                            ('batch_hz_max',  batch_hz.max()),
+                            ('batch_peaks_min',  batch_peaks.min()),
+                            ('batch_peaks_mean', batch_peaks.mean()),
+                            ('batch_peaks_max',  batch_peaks.max()), ])
 
         return rval
 
@@ -3703,6 +3729,41 @@ class ConvPeriodic(ConvElemwise):
                                            output_normalization=on,
                                            kernel_stride=kernel_stride,
                                            monitor_style=monitor_style)
+
+    @wraps(Layer.get_layer_monitoring_channels)
+    def get_layer_monitoring_channels(self, state_below=None,
+                                      state=None, targets=None):
+
+        rval = super(ConvPeriodic, self).get_layer_monitoring_channels(state_below, state, targets)
+
+        self.input_space.validate(state_below)
+
+        z = self.transformer.lmul(state_below)
+        if not hasattr(self, 'tied_b'):
+            self.tied_b = False
+
+        if self.tied_b:
+            b = self.b.dimshuffle('x', 0, 'x', 'x')
+        else:
+            b = self.b.dimshuffle('x', 0, 1, 2)
+
+        z = z + b
+
+        # Check the input to the periodic function, to see how many periods
+        # are represented in the batch
+        batch_hz = T.ptp(z, axis=0) / (2*np.pi)
+        batch_peaks = T.floor(z.max(axis=0)/np.pi) - T.floor(z.min(axis=0)/np.pi)
+
+        new_rval = OrderedDict([('batch_hz_min',  batch_hz.min()),
+                                ('batch_hz_mean', batch_hz.mean()),
+                                ('batch_hz_max',  batch_hz.max()),
+                                ('batch_peaks_min',  batch_peaks.min()),
+                                ('batch_peaks_mean', batch_peaks.mean()),
+                                ('batch_peaks_max',  batch_peaks.max()), ])
+
+        rval.update(new_rval)
+
+        return rval
 
 class ConvCos(ConvPeriodic):
 
