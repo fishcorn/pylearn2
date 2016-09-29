@@ -60,7 +60,10 @@ class ZCA_Dataset(DenseDesignMatrix):
                  preprocessor,
                  start=None,
                  stop=None,
-                 axes=None):
+                 axes=None,
+                 randomize_first=False,
+                 rng_seed=0,
+                 percentage_used=0.75):
 
         if axes is not None:
             warnings.warn("The axes argument to ZCA_Dataset no longer has "
@@ -70,6 +73,20 @@ class ZCA_Dataset(DenseDesignMatrix):
                           "ZCA_Dataset. This argument may be removed from "
                           "the library after 2015-05-05.")
         self.args = locals()
+
+        if randomize_first:
+            rng = np.random.RandomState(rng_seed)
+            record_count = preprocessed_dataset.X.shape[0]
+
+            # Permute dataset
+            permutation = rng.permutation(range(record_count))
+            preprocessed_dataset.X = preprocessed_dataset.X[permutation]
+            preprocessed_dataset.y = preprocessed_dataset.y[permutation]
+
+            # Cut off part of the data
+            record_count = int(percentage_used*record_count)
+            preprocessed_dataset.X = preprocessed_dataset.X[:record_count]
+            preprocessed_dataset.y = preprocessed_dataset.y[:record_count]
 
         self.preprocessed_dataset = preprocessed_dataset
         self.preprocessor = preprocessor

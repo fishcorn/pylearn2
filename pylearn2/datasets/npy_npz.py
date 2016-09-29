@@ -2,6 +2,7 @@
 import functools
 import numpy
 from pylearn2.datasets.dense_design_matrix import DenseDesignMatrix
+from pylearn2.format.target_format import convert_to_one_hot
 
 
 class NpyDataset(DenseDesignMatrix):
@@ -66,7 +67,7 @@ class NpzDataset(DenseDesignMatrix):
 
     """A dense dataset based on a .npz archive."""
 
-    def __init__(self, file, key, target_key=None):
+    def __init__(self, file, key, target_key=None, max_labels=None):
         """
         Creates an NpzDataset object.
 
@@ -95,6 +96,11 @@ class NpzDataset(DenseDesignMatrix):
         else:
             y = None
 
+        X = loaded[key]
+        order = numpy.random.permutation(X.shape[0])
+        X = X[order]
+        if max_labels is not None:
+            y = convert_to_one_hot(y[order].reshape(X.shape[0]), max_labels=max_labels)
         if len(loaded[key].shape) == 2:
             super(NpzDataset, self).__init__(X=loaded[key], y=y)
         else:

@@ -97,4 +97,8 @@ def adult(which_set):
 
     X = np.concatenate(pieces, axis=1)
 
+    #from sklearn.preprocessing import scale
+    #X = scale(X)
+    #y = convert_to_one_hot(y.reshape(y.shape[0]).astype('int32'), max_labels=2)
+
     return DenseDesignMatrix(X=X, y=y)
