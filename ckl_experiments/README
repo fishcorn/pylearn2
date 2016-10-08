@@ -1,0 +1,9 @@
+Included herein are the model and experiment configuration files used in our paper Continuous Kernel Learning:
+
+John Moeller, Vivek Srikumar, Sarathkrishna Swaninathan, Suresh Venkatasubramanian, Dustin Webb; Continuous Kernel Learning. Proc. European Conference on Machine Learning and Principles and Practice of Knowledge Discovvery - ECML-PKDD, 2016
+
+The "mlp" directory contains the files related to the libsvm and YearPredictionMSD datasets.
+
+The "convnet" directory contains the files related to the CIFAR10 experiments. The "mkl" subdirectory contains information regarding the model used for feature extraction for training MKL models. The "cckl" subdirectory cotains information related to training convnets with ckl layers.
+
+Files with "tmpl" in the name are template files for constructing experiments. Files ending in ".conf" outline the experimental setup for use with jobman. Finally, we have created a set of files ending in ".yaml" that refelect some of the best performing experiments.

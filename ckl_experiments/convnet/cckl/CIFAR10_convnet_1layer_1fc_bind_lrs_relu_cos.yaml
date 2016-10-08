@@ -1,0 +1,112 @@
+!obj:pylearn2.train.Train {
+  dataset: &train !obj:pylearn2.datasets.zca_dataset.ZCA_Dataset {
+    preprocessed_dataset: !pkl: "${PYLEARN2_DATA_PATH}/cifar10/pylearn2_gcn_whitened/train.pkl",
+    preprocessor: !pkl: "${PYLEARN2_DATA_PATH}/cifar10/pylearn2_gcn_whitened/preprocessor.pkl",
+    start: 0,
+    stop: 40000,
+  },
+
+  model: !obj:pylearn2.models.mlp.MLP {
+    layers: [
+      !obj:pylearn2.models.mlp.ConvElemwise {
+        layer_name: 'h0',
+        nonlinearity: !obj:pylearn2.models.mlp.RectifierConvNonlinearity { 'left_slope': 0.0, },
+        W_lr_scale: 1.0,
+        b_lr_scale: 1.0,
+        output_channels: 32,
+        init_bias: 1,
+        irange: 0.01,
+        kernel_shape: [5, 5],
+        pool_type: 'max',
+        kernel_stride: [1, 1],
+        pool_shape: [3, 3],
+        pool_stride: [2, 2],
+        max_kernel_norm: 1.8,
+        detector_normalization: !obj:pylearn2.expr.normalize.CrossChannelNormalization {
+          alpha: 5e-05,
+          beta: 0.75,
+        },
+      },
+      !obj:pylearn2.models.mlp.RectifiedLinear {
+        layer_name: 'h1',
+        dim: 1000,
+        W_lr_scale: 1.0,
+        b_lr_scale: 1.0,
+        irange: 0.01,
+      },
+      !obj:pylearn2.models.mlp.Cos {
+        layer_name: 'h2',
+        dim: 512,
+        W_lr_scale: 1.0,
+        b_lr_scale: 1.0,
+        irange: 0.01,
+      },
+      !obj:pylearn2.models.mlp.Softmax {
+        layer_name: 'y',
+        n_classes: 10,
+        irange: 0.01,
+        W_lr_scale: 1.0,
+        b_lr_scale: 1.0,
+      }
+    ],
+    input_space: !obj:pylearn2.space.Conv2DSpace {
+      shape: &window_size [32, 32],
+      num_channels: 3,
+      axes: ['c', 0, 1, 'b'],
+    },
+    monitor_targets: 1,
+    batch_size: &batch_size 100,
+  },
+
+  algorithm: !obj:pylearn2.training_algorithms.sgd.SGD {
+    batch_size: *batch_size,
+    learning_rate: 1.0,
+    learning_rule: !obj:pylearn2.training_algorithms.learning_rule.Momentum {
+      init_momentum: 0.5,
+    },
+    train_iteration_mode: 'even_sequential',
+    monitor_iteration_mode: 'even_sequential',
+    monitoring_batches: 5,
+    monitoring_dataset: {
+      train: *train,
+      'valid': !obj:pylearn2.datasets.zca_dataset.ZCA_Dataset {
+        preprocessed_dataset: !pkl: "${PYLEARN2_DATA_PATH}/cifar10/pylearn2_gcn_whitened/train.pkl",
+        preprocessor: !pkl: "${PYLEARN2_DATA_PATH}/cifar10/pylearn2_gcn_whitened/preprocessor.pkl",
+        start: 40000,
+        stop: 50000,
+      },
+    },
+
+    termination_criterion: !obj:pylearn2.termination_criteria.And
+    { criteria: [
+
+        !obj:pylearn2.termination_criteria.MonitorBased { 
+          channel_name: 'valid_objective',
+          prop_decrease: 0.,
+          N: 100,
+        },
+
+        !obj:pylearn2.termination_criteria.EpochCounter {
+          max_epochs: 5000,
+        },
+
+    ]},
+
+  },
+
+
+  extensions: [
+    !obj:pylearn2.train_extensions.best_params.MonitorBasedSaveBest {
+      channel_name: 'valid_objective',
+      save_path: "lsh8_CIFAR10_convnet_1layer_bind_lrs_Rectifier_best.pkl",
+    },
+    !obj:pylearn2.training_algorithms.learning_rule.MomentumAdjustor {
+      start: 1,
+      saturate: 100,
+      final_momentum: 0.99,
+    },
+  ],
+
+  save_freq: 5,
+  save_path: "lsh8_CIFAR10_convnet_1layer_bind_lrs_Rectifier_model.pkl"
+}

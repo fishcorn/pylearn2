@@ -1,0 +1,72 @@
+!obj:pylearn2.train.Train {
+  dataset: &train !obj:pylearn2.datasets.libsvm.LibSVMDataset { dataset_name: 'german.numer', which_set: 'train', use_test_set: 0, rng_seed: 1 },
+
+  model: !obj:pylearn2.models.mlp.MLP {
+    nvis: 24,
+    layers: [
+      !obj:pylearn2.models.mlp.Cos {
+        layer_name: 'h0',
+        dim: 512,
+        istdev: 0.015625,
+        W_lr_scale: 1.0,
+        b_lr_scale: 1.0,
+      },
+      !obj:pylearn2.models.mlp.Softmax {
+        layer_name: 'y',
+        n_classes: 2,
+        irange: 0.01,
+        W_lr_scale: 1.0,
+        b_lr_scale: 1.0,
+      }
+    ],
+    monitor_targets: 1,
+    batch_size: &batch_size 64,
+  },
+
+  algorithm: !obj:pylearn2.training_algorithms.sgd.SGD {
+    batch_size: *batch_size,
+    learning_rate: 0.016582023645561054,
+    learning_rule: !obj:pylearn2.training_algorithms.learning_rule.Momentum {
+      init_momentum: 0.5,
+    },
+    train_iteration_mode: 'even_sequential',
+    monitor_iteration_mode: 'even_sequential',
+    monitoring_batches: 5,
+    monitoring_dataset: {
+      train: *train,
+      valid : &valid !obj:pylearn2.datasets.libsvm.LibSVMDataset { dataset_name: 'german.numer', which_set: 'valid', use_test_set: 0, rng_seed: 1 },
+    },
+
+    termination_criterion: !obj:pylearn2.termination_criteria.And
+    { criteria: [
+
+        !obj:pylearn2.termination_criteria.MonitorBased {
+          channel_name: 'valid_objective',
+          prop_decrease: 0.,
+          N: 100,
+        },
+
+        !obj:pylearn2.termination_criteria.EpochCounter {
+          max_epochs: 10000,
+        },
+
+    ]},
+
+  },
+
+  extensions: [
+
+    !obj:pylearn2.train_extensions.best_params.MonitorBasedSaveBest {
+      channel_name: 'valid_objective',
+      save_path: "ckl_best.pkl",
+    },
+    !obj:pylearn2.training_algorithms.learning_rule.MomentumAdjustor {
+      start: 1,
+      saturate: 10,
+      final_momentum: 0.99
+    },
+  ],
+
+  save_freq: 10,
+  save_path: "ckl_model.pkl"
+}

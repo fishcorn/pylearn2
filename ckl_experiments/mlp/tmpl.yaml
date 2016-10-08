@@ -1,0 +1,72 @@
+!obj:pylearn2.train.Train {
+  dataset: &train %(train_dataset)s,
+
+  model: !obj:pylearn2.models.mlp.MLP {
+    nvis: %(n_vis)d,
+    layers: [
+      !obj:pylearn2.models.mlp.Cos {
+        layer_name: 'h0',
+        dim: %(h0_width)d,
+        istdev: %(h0_sd)f,
+        W_lr_scale: %(h0_lr_scale)f,
+        b_lr_scale: %(h0_lr_scale)f,
+      },
+      !obj:pylearn2.models.mlp.Softmax {
+        layer_name: 'y',
+        n_classes: %(n_classes)d,
+        irange: 0.01,
+        W_lr_scale: %(y_lr_scale)f,
+        b_lr_scale: %(y_lr_scale)f,
+      }
+    ],
+    monitor_targets: 1,
+    batch_size: &batch_size %(batch_size)d,
+  },
+
+  algorithm: !obj:pylearn2.training_algorithms.sgd.SGD {
+    batch_size: *batch_size,
+    learning_rate: %(learning_rate)f,
+    learning_rule: !obj:pylearn2.training_algorithms.learning_rule.Momentum {
+      init_momentum: %(momentum_initial)f,
+    },
+    train_iteration_mode: 'even_sequential',
+    monitor_iteration_mode: 'even_sequential',
+    monitoring_batches: 5,
+    monitoring_dataset: {
+      train: *train,
+      valid : &valid %(valid_dataset)s,
+    },
+
+    termination_criterion: !obj:pylearn2.termination_criteria.And
+    { criteria: [
+
+        !obj:pylearn2.termination_criteria.MonitorBased {
+          channel_name: 'valid_objective',
+          prop_decrease: 0.,
+          N: %(early_stop_iters)d,
+        },
+
+        !obj:pylearn2.termination_criteria.EpochCounter {
+          max_epochs: %(max_epochs)d,
+        },
+
+    ]},
+
+  },
+
+  extensions: [
+
+    !obj:pylearn2.train_extensions.best_params.MonitorBasedSaveBest {
+      channel_name: 'valid_objective',
+      save_path: "ckl_best.pkl",
+    },
+    !obj:pylearn2.training_algorithms.learning_rule.MomentumAdjustor {
+      start: %(momentum_start)d,
+      saturate: %(momentum_saturate)d,
+      final_momentum: %(momentum_final)f
+    },
+  ],
+
+  save_freq: 10,
+  save_path: "ckl_model.pkl"
+}
